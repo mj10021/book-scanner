@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>PageLift — Book Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap');
+
+  :root {
+    --bg: #0a0a0a;
+    --bg-elevated: #141414;
+    --bg-card: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e8e4df;
+    --text-dim: #7a7670;
+    --text-muted: #4a4640;
+    --green: #22c55e;
+    --green-glow: rgba(34, 197, 94, 0.3);
+    --green-dim: #166534;
+    --amber: #f59e0b;
+    --amber-glow: rgba(245, 158, 11, 0.2);
+    --red: #ef4444;
+    --blue: #3b82f6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── DESKTOP VIEW ─── */
+  .desktop-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    padding: 40px 20px;
+  }
+
+  .desktop-logo {
+    font-family: 'Instrument Serif', serif;
+    font-size: 64px;
+    letter-spacing: -2px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .desktop-subtitle {
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 60px;
+  }
+
+  .desktop-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 48px;
+    max-width: 520px;
+    width: 100%;
+    text-align: center;
+  }
+
+  .desktop-card h2 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 28px;
+    font-weight: 400;
+    margin-bottom: 12px;
+  }
+
+  .desktop-card p {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.7;
+    margin-bottom: 32px;
+  }
+
+  .url-display {
+    background: var(--bg);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+
+  .url-display code {
+    font-family: 'DM Mono', monospace;
+    font-size: 15px;
+    color: var(--green);
+    word-break: break-all;
+  }
+
+  .url-display .copy-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 10px;
+  }
+
+  .qr-placeholder {
+    width: 200px;
+    height: 200px;
+    margin: 0 auto 24px;
+    background: white;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .qr-placeholder canvas {
+    image-rendering: pixelated;
+  }
+
+  .or-divider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 28px 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  .or-divider::before, .or-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .btn-scan-here {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--green);
+    color: #000;
+    border: none;
+    border-radius: 10px;
+    padding: 14px 32px;
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-scan-here:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px var(--green-glow);
+  }
+
+  /* ─── MOBILE SCANNER ─── */
+  .scanner-view {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+  }
+
+  .scanner-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
+    padding-top: max(16px, env(safe-area-inset-top));
+  }
+
+  .scanner-logo {
+    font-family: 'Instrument Serif', serif;
+    font-size: 22px;
+  }
+
+  .page-counter {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .page-counter .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+
+  .camera-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .camera-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .camera-container canvas {
+    display: none;
+  }
+
+  /* Scan frame overlay */
+  .scan-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .scan-frame {
+    width: 85%;
+    height: 70%;
+    position: relative;
+  }
+
+  .scan-corner {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    border-color: var(--text);
+    border-style: solid;
+    border-width: 0;
+    opacity: 0.6;
+    transition: all 0.4s ease;
+  }
+
+  .scan-corner.tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 4px; }
+  .scan-corner.tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 4px; }
+  .scan-corner.bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 4px; }
+  .scan-corner.br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 4px; }
+
+  .scan-frame.stable .scan-corner { border-color: var(--green); opacity: 1; }
+  .scan-frame.captured .scan-corner { border-color: var(--green); opacity: 1; width: 40px; height: 40px; }
+
+  /* Status indicator */
+  .status-indicator {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-bottom: 24px;
+  }
+
+  .status-pill {
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 10px 24px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.3s ease;
+  }
+
+  .status-pill.stable {
+    border-color: var(--green-dim);
+    background: rgba(0,0,0,0.8);
+  }
+
+  .status-pill.captured {
+    border-color: var(--green);
+    background: rgba(22, 101, 52, 0.5);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: all 0.3s;
+  }
+
+  .status-dot.searching { background: var(--amber); animation: pulse 1.5s infinite; }
+  .status-dot.stabilizing { background: var(--blue); animation: pulse 0.8s infinite; }
+  .status-dot.stable { background: var(--green); }
+  .status-dot.captured { background: var(--green); box-shadow: 0 0 12px var(--green-glow); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  /* Green checkmark overlay */
+  .capture-flash {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(22, 101, 52, 0.15);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+  }
+
+  .capture-flash.show {
+    opacity: 1;
+  }
+
+  .checkmark-circle {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 60px var(--green-glow), 0 0 120px rgba(34, 197, 94, 0.15);
+    animation: checkPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes checkPop {
+    0% { transform: scale(0); }
+    100% { transform: scale(1); }
+  }
+
+  .checkmark-circle svg {
+    width: 48px;
+    height: 48px;
+    stroke: #000;
+    stroke-width: 3;
+    fill: none;
+  }
+
+  /* Bottom controls */
+  .scanner-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    padding: 20px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .btn-control {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 12px;
+    padding: 12px 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-control:active { transform: scale(0.96); }
+
+  .btn-done {
+    background: var(--green);
+    border-color: var(--green);
+    color: #000;
+    font-weight: 500;
+    padding: 14px 28px;
+    font-size: 14px;
+  }
+
+  .btn-manual-capture {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: transparent;
+    border: 3px solid var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+
+  .btn-manual-capture::after {
+    content: '';
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--text);
+    transition: all 0.15s;
+  }
+
+  .btn-manual-capture:active::after {
+    transform: scale(0.9);
+    background: var(--green);
+  }
+
+  /* ─── SETTINGS PANEL ─── */
+  .settings-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(8px);
+    display: none;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  .settings-panel.open { display: flex; }
+
+  .settings-sheet {
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border);
+    border-radius: 20px 20px 0 0;
+    padding: 32px 24px;
+    padding-bottom: max(32px, env(safe-area-inset-bottom));
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  .settings-sheet h3 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 24px;
+    font-weight: 400;
+    margin-bottom: 24px;
+  }
+
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .setting-row label {
+    font-size: 13px;
+  }
+
+  .setting-row .desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .toggle {
+    width: 48px;
+    height: 28px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+  }
+
+  .toggle.active {
+    background: var(--green-dim);
+    border-color: var(--green);
+  }
+
+  .toggle::after {
+    content: '';
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--text);
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: all 0.2s;
+  }
+
+  .toggle.active::after { left: 22px; }
+
+  .settings-close {
+    display: block;
+    width: 100%;
+    margin-top: 24px;
+    padding: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* ─── REVIEW / EXPORT PANEL ─── */
+  .review-view {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: var(--bg);
+    display: none;
+    flex-direction: column;
+  }
+
+  .review-view.open { display: flex; }
+
+  .review-header {
+    padding: 16px 20px;
+    padding-top: max(16px, env(safe-area-inset-top));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .review-header h2 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 24px;
+    font-weight: 400;
+  }
+
+  .review-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+    align-content: start;
+  }
+
+  .review-thumb {
+    aspect-ratio: 3/4;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative;
+    cursor: pointer;
+  }
+
+  .review-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .review-thumb .page-num {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+  }
+
+  .review-thumb .delete-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--red);
+    border: none;
+    color: white;
+    font-size: 14px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .review-thumb:hover .delete-btn { display: flex; }
+
+  .review-actions {
+    padding: 16px 20px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+  }
+
+  .review-actions button {
+    flex: 1;
+  }
+
+  /* ─── PROGRESS BAR ─── */
+  .progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: var(--green);
+    transition: width 0.1s linear;
+    border-radius: 0 2px 2px 0;
+  }
+
+  /* ─── ONBOARDING ─── */
+  .onboarding {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+    text-align: center;
+  }
+
+  .onboarding.hidden { display: none; }
+
+  .onboarding-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 32px;
+    font-size: 36px;
+  }
+
+  .onboarding h1 {
+    font-family: 'Instrument Serif', serif;
+    font-size: 36px;
+    font-weight: 400;
+    margin-bottom: 12px;
+  }
+
+  .onboarding p {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.8;
+    max-width: 320px;
+    margin-bottom: 40px;
+  }
+
+  .steps-list {
+    text-align: left;
+    max-width: 320px;
+    margin-bottom: 40px;
+  }
+
+  .step-item {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 12px 0;
+  }
+
+  .step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+    color: var(--green);
+  }
+
+  .step-item .step-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    padding-top: 3px;
+  }
+
+  .btn-start {
+    background: var(--green);
+    color: #000;
+    border: none;
+    border-radius: 12px;
+    padding: 16px 48px;
+    font-family: 'DM Mono', monospace;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-start:hover {
+    box-shadow: 0 8px 32px var(--green-glow);
+    transform: translateY(-1px);
+  }
+
+  /* ─── GENERATING OVERLAY ─── */
+  .generating-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    background: rgba(0,0,0,0.9);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  .generating-overlay.show { display: flex; }
+
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .generating-overlay p {
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+
+  /* ─── STABILITY PROGRESS RING ─── */
+  .stability-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .stability-ring.show { opacity: 1; }
+
+  .stability-ring circle {
+    fill: none;
+    stroke-width: 3;
+  }
+
+  .stability-ring .bg { stroke: rgba(255,255,255,0.1); }
+
+  .stability-ring .progress {
+    stroke: var(--green);
+    stroke-linecap: round;
+    stroke-dasharray: 251.3;
+    stroke-dashoffset: 251.3;
+    transition: stroke-dashoffset 0.1s linear;
+    filter: drop-shadow(0 0 6px var(--green-glow));
+  }
+</style>
+</head>
+<body>
+
+<!-- DESKTOP VIEW -->
+<div id="desktopView" class="desktop-view" style="display:none">
+  <div class="desktop-logo">PageLift</div>
+  <div class="desktop-subtitle">Book Scanner</div>
+  <div class="desktop-card">
+    <h2>Scan with your phone</h2>
+    <p>Mount your phone above the book and scan pages one by one. Open this URL on your phone to start scanning.</p>
+    <div class="url-display">
+      <code id="shareUrl"></code>
+      <div class="copy-hint">Tap to copy</div>
+    </div>
+    <div class="or-divider">or scan on this device</div>
+    <button class="btn-scan-here" onclick="startScanner()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      Start scanning
+    </button>
+  </div>
+</div>
+
+<!-- ONBOARDING (Mobile) -->
+<div id="onboarding" class="onboarding hidden">
+  <div class="onboarding-icon">📖</div>
+  <h1>PageLift</h1>
+  <p>Turn your physical books into digital PDFs, one page at a time.</p>
+  <div class="steps-list">
+    <div class="step-item">
+      <div class="step-num">1</div>
+      <div class="step-text">Mount your phone above the book, camera facing down</div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">2</div>
+      <div class="step-text">Hold still — pages are captured automatically when stable</div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">3</div>
+      <div class="step-text">Turn the page when you see the green checkmark</div>
+    </div>
+    <div class="step-item">
+      <div class="step-num">4</div>
+      <div class="step-text">Tap "Done" to generate your PDF</div>
+    </div>
+  </div>
+  <button class="btn-start" onclick="startScanner()">Begin Scanning</button>
+</div>
+
+<!-- SCANNER VIEW -->
+<div id="scannerView" class="scanner-view" style="display:none">
+  <div class="scanner-header">
+    <div class="scanner-logo">PageLift</div>
+    <div class="page-counter">
+      <div class="dot"></div>
+      <span id="pageCount">0 pages</span>
+    </div>
+  </div>
+
+  <div class="camera-container">
+    <video id="cameraFeed" autoplay playsinline muted></video>
+    <canvas id="captureCanvas"></canvas>
+    <canvas id="compareCanvas" width="64" height="64" style="display:none"></canvas>
+
+    <div class="scan-overlay">
+      <div id="scanFrame" class="scan-frame">
+        <div class="scan-corner tl"></div>
+        <div class="scan-corner tr"></div>
+        <div class="scan-corner bl"></div>
+        <div class="scan-corner br"></div>
+      </div>
+
+      <svg class="stability-ring" id="stabilityRing" width="90" height="90" viewBox="0 0 90 90">
+        <circle class="bg" cx="45" cy="45" r="40"/>
+        <circle class="progress" id="ringProgress" cx="45" cy="45" r="40" transform="rotate(-90 45 45)"/>
+      </svg>
+    </div>
+
+    <div class="capture-flash" id="captureFlash">
+      <div class="checkmark-circle">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+    </div>
+
+    <div class="status-indicator">
+      <div class="status-pill" id="statusPill">
+        <div class="status-dot searching" id="statusDot"></div>
+        <span id="statusText">Positioning...</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="scanner-controls">
+    <button class="btn-control" onclick="openSettings()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+    </button>
+    <button class="btn-manual-capture" id="manualCapture" onclick="manualCapturePage()"></button>
+    <button class="btn-control btn-done" id="btnDone" onclick="openReview()">
+      Done
+    </button>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="settingsPanel" class="settings-panel">
+  <div class="settings-sheet">
+    <h3>Settings</h3>
+    <div class="setting-row">
+      <div>
+        <label>Auto-capture</label>
+        <div class="desc">Capture pages automatically when stable</div>
+      </div>
+      <div class="toggle active" id="toggleAuto" onclick="toggleSetting('auto')"></div>
+    </div>
+    <div class="setting-row">
+      <div>
+        <label>Capture sound</label>
+        <div class="desc">Play a shutter sound on capture</div>
+      </div>
+      <div class="toggle active" id="toggleSound" onclick="toggleSetting('sound')"></div>
+    </div>
+    <div class="setting-row">
+      <div>
+        <label>High resolution</label>
+        <div class="desc">Use maximum camera resolution (slower)</div>
+      </div>
+      <div class="toggle" id="toggleHires" onclick="toggleSetting('hires')"></div>
+    </div>
+    <button class="settings-close" onclick="closeSettings()">Close</button>
+  </div>
+</div>
+
+<!-- REVIEW -->
+<div id="reviewView" class="review-view">
+  <div class="review-header">
+    <button class="btn-control" onclick="closeReview()">← Back</button>
+    <h2 id="reviewTitle">0 Pages</h2>
+    <div style="width:80px"></div>
+  </div>
+  <div class="review-grid" id="reviewGrid"></div>
+  <div class="review-actions">
+    <button class="btn-control" onclick="closeReview()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      Continue
+    </button>
+    <button class="btn-control btn-done" onclick="generatePDF()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export PDF
+    </button>
+  </div>
+</div>
+
+<!-- GENERATING OVERLAY -->
+<div id="generatingOverlay" class="generating-overlay">
+  <div class="spinner"></div>
+  <p id="genText">Generating PDF...</p>
+</div>
+
+<script>
+  // ─── STATE ───
+  const state = {
+    pages: [],           // Array of { dataUrl, timestamp }
+    isScanning: false,
+    autoCapture: true,
+    sound: true,
+    hires: false,
+    stream: null,
+    animFrame: null,
+    phase: 'idle',       // idle | searching | stabilizing | captured | turning
+    stableFrames: 0,
+    lastFrameData: null,
+    captureTimeout: null,
+    stabilityRequired: 18, // frames of stability needed (~1.5s at 12fps)
+    motionThreshold: 12,   // pixel diff threshold for motion
+    cooldownUntil: 0,
+  };
+
+  // ─── INIT ───
+  function init() {
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+
+    if (isMobile) {
+      document.getElementById('onboarding').classList.remove('hidden');
+    } else {
+      document.getElementById('desktopView').style.display = '';
+      document.getElementById('shareUrl').textContent = window.location.href;
+      document.querySelector('.url-display').addEventListener('click', () => {
+        navigator.clipboard?.writeText(window.location.href);
+        document.querySelector('.copy-hint').textContent = 'Copied!';
+        setTimeout(() => document.querySelector('.copy-hint').textContent = 'Tap to copy', 2000);
+      });
+    }
+  }
+
+  // ─── START SCANNER ───
+  async function startScanner() {
+    document.getElementById('desktopView').style.display = 'none';
+    document.getElementById('onboarding').classList.add('hidden');
+    document.getElementById('scannerView').style.display = '';
+
+    try {
+      const constraints = {
+        video: {
+          facingMode: 'environment',
+          width: state.hires ? { ideal: 3840 } : { ideal: 1920 },
+          height: state.hires ? { ideal: 2160 } : { ideal: 1080 },
+        }
+      };
+
+      state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const video = document.getElementById('cameraFeed');
+      video.srcObject = state.stream;
+      await video.play();
+
+      state.isScanning = true;
+      state.phase = 'searching';
+      updateStatus('searching', 'Positioning...');
+      requestAnimationFrame(scanLoop);
+
+    } catch (err) {
+      console.error('Camera error:', err);
+      alert('Unable to access camera. Please grant camera permissions and try again.');
+    }
+  }
+
+  // ─── SCAN LOOP ───
+  let lastLoopTime = 0;
+  const LOOP_INTERVAL = 83; // ~12fps for comparison
+
+  function scanLoop(timestamp) {
+    if (!state.isScanning) return;
+    state.animFrame = requestAnimationFrame(scanLoop);
+
+    if (timestamp - lastLoopTime < LOOP_INTERVAL) return;
+    lastLoopTime = timestamp;
+
+    if (Date.now() < state.cooldownUntil) return;
+
+    const video = document.getElementById('cameraFeed');
+    const compareCanvas = document.getElementById('compareCanvas');
+    const ctx = compareCanvas.getContext('2d', { willReadFrequently: true });
+
+    // Draw downsampled frame for comparison
+    ctx.drawImage(video, 0, 0, 64, 64);
+    const currentFrame = ctx.getImageData(0, 0, 64, 64);
+
+    if (state.lastFrameData) {
+      const diff = getFrameDiff(state.lastFrameData, currentFrame.data);
+
+      if (state.phase === 'searching' || state.phase === 'turning') {
+        if (diff < state.motionThreshold) {
+          state.stableFrames++;
+          if (state.stableFrames > 3) {
+            state.phase = 'stabilizing';
+            updateStatus('stabilizing', 'Hold steady...');
+          }
+        } else {
+          state.stableFrames = 0;
+        }
+      } else if (state.phase === 'stabilizing') {
+        if (diff < state.motionThreshold) {
+          state.stableFrames++;
+          updateStabilityRing(state.stableFrames / state.stabilityRequired);
+
+          if (state.stableFrames >= state.stabilityRequired && state.autoCapture) {
+            capturePage();
+          }
+        } else {
+          state.stableFrames = 0;
+          state.phase = 'searching';
+          updateStatus('searching', 'Positioning...');
+          updateStabilityRing(0);
+        }
+      } else if (state.phase === 'captured') {
+        if (diff > state.motionThreshold * 2) {
+          state.phase = 'turning';
+          state.stableFrames = 0;
+          updateStatus('searching', 'Turning page...');
+          updateStabilityRing(0);
+          document.getElementById('captureFlash').classList.remove('show');
+          document.getElementById('scanFrame').classList.remove('captured');
+        }
+      }
+    }
+
+    state.lastFrameData = currentFrame.data;
+  }
+
+  function getFrameDiff(prev, curr) {
+    let totalDiff = 0;
+    const len = prev.length;
+    // Sample every 4th pixel (every 16th byte = R channel of every 4th pixel)
+    for (let i = 0; i < len; i += 16) {
+      totalDiff += Math.abs(prev[i] - curr[i]);
+    }
+    return totalDiff / (len / 16);
+  }
+
+  // ─── CAPTURE PAGE ───
+  function capturePage() {
+    const video = document.getElementById('cameraFeed');
+    const canvas = document.getElementById('captureCanvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    state.pages.push({ dataUrl, timestamp: Date.now() });
+
+    // UI feedback
+    state.phase = 'captured';
+    updateStatus('captured', '✓ Page ' + state.pages.length + ' captured');
+    document.getElementById('pageCount').textContent = state.pages.length + ' page' + (state.pages.length !== 1 ? 's' : '');
+    document.getElementById('captureFlash').classList.add('show');
+    document.getElementById('scanFrame').classList.add('captured');
+    updateStabilityRing(0);
+
+    // Play sound
+    if (state.sound) playShutterSound();
+
+    // Set a cooldown so we don't accidentally re-capture
+    state.cooldownUntil = Date.now() + 500;
+  }
+
+  function manualCapturePage() {
+    if (state.isScanning && state.phase !== 'captured') {
+      capturePage();
+    }
+  }
+
+  // ─── UI UPDATES ───
+  function updateStatus(type, text) {
+    const dot = document.getElementById('statusDot');
+    const pill = document.getElementById('statusPill');
+    const textEl = document.getElementById('statusText');
+    const frame = document.getElementById('scanFrame');
+
+    dot.className = 'status-dot ' + type;
+    pill.className = 'status-pill ' + (type === 'captured' ? 'captured' : type === 'stabilizing' ? 'stable' : '');
+    textEl.textContent = text;
+
+    frame.classList.toggle('stable', type === 'stabilizing');
+    frame.classList.toggle('captured', type === 'captured');
+  }
+
+  function updateStabilityRing(progress) {
+    const ring = document.getElementById('stabilityRing');
+    const circle = document.getElementById('ringProgress');
+    const circumference = 2 * Math.PI * 40; // r=40
+
+    ring.classList.toggle('show', progress > 0 && progress < 1);
+    circle.style.strokeDashoffset = circumference * (1 - Math.min(progress, 1));
+  }
+
+  // ─── SETTINGS ───
+  function toggleSetting(key) {
+    if (key === 'auto') {
+      state.autoCapture = !state.autoCapture;
+      document.getElementById('toggleAuto').classList.toggle('active', state.autoCapture);
+    } else if (key === 'sound') {
+      state.sound = !state.sound;
+      document.getElementById('toggleSound').classList.toggle('active', state.sound);
+    } else if (key === 'hires') {
+      state.hires = !state.hires;
+      document.getElementById('toggleHires').classList.toggle('active', state.hires);
+    }
+  }
+
+  function openSettings() {
+    document.getElementById('settingsPanel').classList.add('open');
+  }
+
+  function closeSettings() {
+    document.getElementById('settingsPanel').classList.remove('open');
+  }
+
+  // ─── REVIEW ───
+  function openReview() {
+    const grid = document.getElementById('reviewGrid');
+    grid.innerHTML = '';
+    state.pages.forEach((page, i) => {
+      const thumb = document.createElement('div');
+      thumb.className = 'review-thumb';
+      thumb.innerHTML = `
+        <img src="${page.dataUrl}" alt="Page ${i + 1}">
+        <div class="page-num">${i + 1}</div>
+        <button class="delete-btn" onclick="deletePage(${i}, event)">✕</button>
+      `;
+      grid.appendChild(thumb);
+    });
+    document.getElementById('reviewTitle').textContent = state.pages.length + ' Pages';
+    document.getElementById('reviewView').classList.add('open');
+  }
+
+  function closeReview() {
+    document.getElementById('reviewView').classList.remove('open');
+  }
+
+  function deletePage(index, event) {
+    event.stopPropagation();
+    state.pages.splice(index, 1);
+    document.getElementById('pageCount').textContent = state.pages.length + ' page' + (state.pages.length !== 1 ? 's' : '');
+    openReview(); // re-render
+  }
+
+  // ─── PDF GENERATION ───
+  async function generatePDF() {
+    if (state.pages.length === 0) {
+      alert('No pages to export.');
+      return;
+    }
+
+    const overlay = document.getElementById('generatingOverlay');
+    const genText = document.getElementById('genText');
+    overlay.classList.add('show');
+
+    try {
+      const { jsPDF } = window.jspdf;
+
+      // Load first image to get dimensions
+      const firstImg = await loadImage(state.pages[0].dataUrl);
+      const ratio = firstImg.width / firstImg.height;
+
+      // Create PDF with dimensions matching the image aspect ratio
+      const pageWidth = 210; // A4 width in mm
+      const pageHeight = pageWidth / ratio;
+
+      const pdf = new jsPDF({
+        orientation: ratio > 1 ? 'landscape' : 'portrait',
+        unit: 'mm',
+        format: [pageWidth, pageHeight]
+      });
+
+      for (let i = 0; i < state.pages.length; i++) {
+        genText.textContent = `Processing page ${i + 1} of ${state.pages.length}...`;
+
+        if (i > 0) pdf.addPage([pageWidth, pageHeight]);
+        pdf.addImage(state.pages[i].dataUrl, 'JPEG', 0, 0, pageWidth, pageHeight);
+
+        // Yield to UI thread
+        await new Promise(r => setTimeout(r, 10));
+      }
+
+      genText.textContent = 'Saving...';
+      const timestamp = new Date().toISOString().slice(0, 10);
+      pdf.save(`PageLift-${timestamp}.pdf`);
+
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      alert('Error generating PDF: ' + err.message);
+    }
+
+    overlay.classList.remove('show');
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  // ─── SOUND ───
+  function playShutterSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+    } catch(e) {}
+  }
+
+  // ─── PREVENT ZOOM ───
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('dblclick', e => e.preventDefault());
+
+  // ─── BOOT ───
+  init();
+</script>
+
+</body>
+</html>
