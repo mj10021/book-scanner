@@ -602,6 +602,25 @@
 
   .review-thumb:hover .delete-btn { display: flex; }
 
+  .thumb-processing {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .thumb-processing::after {
+    content: '';
+    width: 22px;
+    height: 22px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
   .review-actions {
     padding: 16px 20px;
     padding-bottom: max(16px, env(safe-area-inset-bottom));
@@ -908,6 +927,13 @@
       </div>
       <div class="toggle" id="toggleHires" onclick="toggleSetting('hires')"></div>
     </div>
+    <div class="setting-row">
+      <div>
+        <label>Scanner mode</label>
+        <div class="desc">Auto-correct perspective &amp; enhance contrast like a flatbed scanner</div>
+      </div>
+      <div class="toggle active" id="toggleScanner" onclick="toggleSetting('scanner')"></div>
+    </div>
     <button class="settings-close" onclick="closeSettings()">Close</button>
   </div>
 </div>
@@ -946,6 +972,7 @@
     autoCapture: true,
     sound: true,
     hires: false,
+    scannerMode: true,
     stream: null,
     animFrame: null,
     phase: 'idle',       // idle | searching | stabilizing | captured | turning
@@ -1087,8 +1114,20 @@
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0);
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    state.pages.push({ dataUrl, timestamp: Date.now() });
+    const rawDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    state.pages.push({ dataUrl: rawDataUrl, timestamp: Date.now(), processing: state.scannerMode });
+    const pageIndex = state.pages.length - 1;
+
+    if (state.scannerMode) {
+      processPageImage(rawDataUrl).then(processed => {
+        if (state.pages[pageIndex]) {
+          state.pages[pageIndex].dataUrl = processed;
+          state.pages[pageIndex].processing = false;
+        }
+      }).catch(() => {
+        if (state.pages[pageIndex]) state.pages[pageIndex].processing = false;
+      });
+    }
 
     // UI feedback
     state.phase = 'captured';
@@ -1146,6 +1185,9 @@
     } else if (key === 'hires') {
       state.hires = !state.hires;
       document.getElementById('toggleHires').classList.toggle('active', state.hires);
+    } else if (key === 'scanner') {
+      state.scannerMode = !state.scannerMode;
+      document.getElementById('toggleScanner').classList.toggle('active', state.scannerMode);
     }
   }
 
@@ -1168,6 +1210,7 @@
         <img src="${page.dataUrl}" alt="Page ${i + 1}">
         <div class="page-num">${i + 1}</div>
         <button class="delete-btn" onclick="deletePage(${i}, event)">✕</button>
+        ${page.processing ? '<div class="thumb-processing"></div>' : ''}
       `;
       grid.appendChild(thumb);
     });
@@ -1243,6 +1286,277 @@
       img.onerror = reject;
       img.src = src;
     });
+  }
+
+  // ─── SCANNER PROCESSING ───
+
+  async function processPageImage(dataUrl) {
+    const img = await loadImage(dataUrl);
+
+    // Cap at 2500px on longest side for performance
+    const MAX = 2500;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const W = Math.round(img.width * scale);
+    const H = Math.round(img.height * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, W, H);
+
+    let imageData = ctx.getImageData(0, 0, W, H);
+
+    // Build grayscale for corner detection
+    const gray = buildGray(imageData.data, W, H);
+
+    // Perspective correction
+    const corners = detectPageCorners(gray, W, H);
+    if (corners) {
+      const warped = warpPerspective(imageData.data, W, H, corners);
+      canvas.width = warped.width;
+      canvas.height = warped.height;
+      ctx.putImageData(warped.imageData, 0, 0);
+      imageData = warped.imageData;
+    }
+
+    // Scanner enhancement
+    const enhanced = applyScannerEffect(imageData, canvas.width, canvas.height);
+    ctx.putImageData(enhanced, 0, 0);
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+  }
+
+  function buildGray(data, W, H) {
+    const N = W * H;
+    const gray = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      gray[i] = data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114;
+    }
+    return gray;
+  }
+
+  function detectPageCorners(gray, W, H) {
+    const N = W * H;
+
+    // Otsu threshold to separate page (bright) from background (dark)
+    const hist = new Int32Array(256);
+    for (let i = 0; i < N; i++) hist[Math.min(255, gray[i] | 0)]++;
+    let sum = 0;
+    for (let v = 0; v < 256; v++) sum += v * hist[v];
+    let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (!wB || wB === N) continue;
+      sumB += t * hist[t];
+      const mB = sumB / wB, mF = (sum - sumB) / (N - wB);
+      const v = wB * (N - wB) * (mB - mF) * (mB - mF);
+      if (v > maxVar) { maxVar = v; threshold = t; }
+    }
+
+    // Find the 4 extreme corners using diagonal projections:
+    // TL = min(x+y), TR = max(x-y), BL = min(x-y), BR = max(x+y)
+    let tlScore = Infinity, trScore = -Infinity, blScore = -Infinity, brScore = -Infinity;
+    let tl = null, tr = null, bl = null, br = null;
+    const step = Math.max(1, Math.round(Math.min(W, H) / 300));
+
+    for (let y = 0; y < H; y += step) {
+      for (let x = 0; x < W; x += step) {
+        if (gray[y * W + x] <= threshold) continue;
+        const s = x + y, d = x - y;
+        if (s < tlScore) { tlScore = s; tl = { x, y }; }
+        if (d > trScore) { trScore = d; tr = { x, y }; }
+        if (d < blScore) { blScore = d; bl = { x, y }; }
+        if (s > brScore) { brScore = s; br = { x, y }; }
+      }
+    }
+
+    if (!tl || !tr || !bl || !br) return null;
+
+    // Validate: quad area should be at least 15% of image
+    const area = Math.abs(
+      (tr.x - tl.x) * (br.y - tl.y) - (br.x - tl.x) * (tr.y - tl.y)
+    );
+    if (area < W * H * 0.15) return null;
+
+    // If all corners are within 3% of image edges, skip (page fills frame, no warp needed)
+    const margin = Math.min(W, H) * 0.03;
+    if (tl.x < margin && tl.y < margin &&
+        tr.x > W - margin && tr.y < margin &&
+        bl.x < margin && bl.y > H - margin &&
+        br.x > W - margin && br.y > H - margin) return null;
+
+    return [tl, tr, br, bl]; // clockwise: TL, TR, BR, BL
+  }
+
+  function warpPerspective(srcData, srcW, srcH, corners) {
+    const [tl, tr, br, bl] = corners;
+    const outW = Math.round(Math.max(
+      Math.hypot(tr.x - tl.x, tr.y - tl.y),
+      Math.hypot(br.x - bl.x, br.y - bl.y)
+    ));
+    const outH = Math.round(Math.max(
+      Math.hypot(bl.x - tl.x, bl.y - tl.y),
+      Math.hypot(br.x - tr.x, br.y - tr.y)
+    ));
+
+    const dst = [{ x: 0, y: 0 }, { x: outW, y: 0 }, { x: outW, y: outH }, { x: 0, y: outH }];
+    const H_fwd = computeHomography(corners, dst);
+    if (!H_fwd) return { imageData: new ImageData(srcW, srcH), width: srcW, height: srcH };
+    const H_inv = invertMatrix3x3(H_fwd);
+    if (!H_inv) return { imageData: new ImageData(srcW, srcH), width: srcW, height: srcH };
+
+    const outImgData = new ImageData(outW, outH);
+    const outPx = outImgData.data;
+
+    for (let dy = 0; dy < outH; dy++) {
+      for (let dx = 0; dx < outW; dx++) {
+        const [sx, sy] = applyH(H_inv, dx, dy);
+        const x0 = sx | 0, y0 = sy | 0;
+        if (x0 < 0 || x0 >= srcW - 1 || y0 < 0 || y0 >= srcH - 1) continue;
+        const fx = sx - x0, fy = sy - y0;
+        const i00 = (y0 * srcW + x0) * 4;
+        const i10 = i00 + 4;
+        const i01 = i00 + srcW * 4;
+        const i11 = i01 + 4;
+        const oi = (dy * outW + dx) * 4;
+        for (let c = 0; c < 3; c++) {
+          outPx[oi + c] =
+            srcData[i00 + c] * (1 - fx) * (1 - fy) +
+            srcData[i10 + c] * fx * (1 - fy) +
+            srcData[i01 + c] * (1 - fx) * fy +
+            srcData[i11 + c] * fx * fy;
+        }
+        outPx[oi + 3] = 255;
+      }
+    }
+
+    return { imageData: outImgData, width: outW, height: outH };
+  }
+
+  function computeHomography(src, dst) {
+    const A = [];
+    for (let i = 0; i < 4; i++) {
+      const { x, y } = src[i], { x: xp, y: yp } = dst[i];
+      A.push([-x, -y, -1, 0, 0, 0, xp * x, xp * y, xp]);
+      A.push([0, 0, 0, -x, -y, -1, yp * x, yp * y, yp]);
+    }
+    const mat = A.map(r => r.slice(0, 8));
+    const b = A.map(r => -r[8]);
+    const h = gaussElim(mat, b);
+    if (!h) return null;
+    return [[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], 1]];
+  }
+
+  function gaussElim(A, b) {
+    const n = 8;
+    const aug = A.map((r, i) => [...r, b[i]]);
+    for (let col = 0; col < n; col++) {
+      let maxR = col;
+      for (let r = col + 1; r < n; r++) if (Math.abs(aug[r][col]) > Math.abs(aug[maxR][col])) maxR = r;
+      [aug[col], aug[maxR]] = [aug[maxR], aug[col]];
+      if (Math.abs(aug[col][col]) < 1e-10) return null;
+      const piv = aug[col][col];
+      for (let j = col; j <= n; j++) aug[col][j] /= piv;
+      for (let r = 0; r < n; r++) {
+        if (r === col) continue;
+        const f = aug[r][col];
+        for (let j = col; j <= n; j++) aug[r][j] -= f * aug[col][j];
+      }
+    }
+    return aug.map(r => r[n]);
+  }
+
+  function applyH(H, x, y) {
+    const w = H[2][0] * x + H[2][1] * y + H[2][2];
+    return [(H[0][0] * x + H[0][1] * y + H[0][2]) / w,
+            (H[1][0] * x + H[1][1] * y + H[1][2]) / w];
+  }
+
+  function invertMatrix3x3(m) {
+    const [[a, b, c], [d, e, f], [g, h, k]] = m;
+    const det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g);
+    if (Math.abs(det) < 1e-10) return null;
+    const inv = 1 / det;
+    return [
+      [(e * k - f * h) * inv, (c * h - b * k) * inv, (b * f - c * e) * inv],
+      [(f * g - d * k) * inv, (a * k - c * g) * inv, (c * d - a * f) * inv],
+      [(d * h - e * g) * inv, (b * g - a * h) * inv, (a * e - b * d) * inv]
+    ];
+  }
+
+  function applyScannerEffect(imageData, W, H) {
+    const data = imageData.data;
+    const N = W * H;
+
+    // Grayscale luminance
+    const lum = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      lum[i] = data[i * 4] * 0.299 + data[i * 4 + 1] * 0.587 + data[i * 4 + 2] * 0.114;
+    }
+
+    // Estimate background illumination (large box blur removes local shadows)
+    const blurR = Math.max(10, Math.round(Math.min(W, H) * 0.12));
+    const bg = boxBlur(lum, W, H, blurR);
+
+    // Normalize by background so shadows vanish; background → ~220
+    const norm = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      norm[i] = Math.min(255, (lum[i] / Math.max(bg[i], 1)) * 220);
+    }
+
+    // Auto-levels: stretch 2nd–98th percentile to 0–255 via histogram
+    const hist = new Int32Array(256);
+    for (let i = 0; i < N; i++) hist[norm[i] | 0]++;
+    let cumul = 0, lo = 0, hi = 255;
+    for (let v = 0; v < 256; v++) {
+      cumul += hist[v];
+      if (cumul < N * 0.02) lo = v;
+      if (cumul < N * 0.98) hi = v;
+    }
+    const range = Math.max(hi - lo, 1);
+
+    // Write grayscale output with S-curve for crisp text + bright background
+    for (let i = 0; i < N; i++) {
+      let v = Math.max(0, Math.min(255, (norm[i] - lo) / range * 255));
+      // S-curve: darken shadows, brighten highlights
+      v = v < 128
+        ? 128 * Math.pow(v / 128, 1.8)
+        : 255 - 128 * Math.pow((255 - v) / 128, 1.8);
+      const byte = Math.round(v);
+      data[i * 4] = byte;
+      data[i * 4 + 1] = byte;
+      data[i * 4 + 2] = byte;
+      data[i * 4 + 3] = 255;
+    }
+
+    return imageData;
+  }
+
+  function boxBlur(src, W, H, r) {
+    const temp = new Float32Array(W * H);
+    const out = new Float32Array(W * H);
+    // Horizontal pass
+    for (let y = 0; y < H; y++) {
+      let sum = 0;
+      for (let x = -r; x <= r; x++) sum += src[y * W + Math.max(0, Math.min(W - 1, x))];
+      temp[y * W] = sum / (2 * r + 1);
+      for (let x = 1; x < W; x++) {
+        sum += src[y * W + Math.min(W - 1, x + r)] - src[y * W + Math.max(0, x - r - 1)];
+        temp[y * W + x] = sum / (2 * r + 1);
+      }
+    }
+    // Vertical pass
+    for (let x = 0; x < W; x++) {
+      let sum = 0;
+      for (let y = -r; y <= r; y++) sum += temp[Math.max(0, Math.min(H - 1, y)) * W + x];
+      out[x] = sum / (2 * r + 1);
+      for (let y = 1; y < H; y++) {
+        sum += temp[Math.min(H - 1, y + r) * W + x] - temp[Math.max(0, y - r - 1) * W + x];
+        out[y * W + x] = sum / (2 * r + 1);
+      }
+    }
+    return out;
   }
 
   // ─── SOUND ───
